@@ -1,0 +1,21 @@
+name: Auto-Restart-RDP
+
+on:
+  workflow_run:
+    workflows: ["RDP"]
+    types:
+      - completed
+
+  schedule:
+    - cron: "0 */6 * * *"
+
+jobs:
+  restart:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Restart RDP Workflow
+        uses: peter-evans/workflow-dispatch@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          workflow: "RDP.yml"
