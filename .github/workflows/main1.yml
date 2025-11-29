@@ -1,0 +1,60 @@
+name: RDP1
+
+on:
+  workflow_dispatch:
+
+jobs:
+  secure-rdp:
+    runs-on: windows-2022
+    timeout-minutes: 3600
+
+    steps:
+
+      - name: Enable & Configure RDP
+        run: |
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0 -Force
+          netsh advfirewall firewall add rule name="RDP-PORT" dir=in action=allow protocol=TCP localport=3389
+
+      - name: Create RDP1 User
+        run: |
+          Add-Type -AssemblyName System.Security
+          $password = -join ((48..57)+(65..90)+(97..122) | Get-Random -Count 14 | % {[char]$_})
+          $secure = ConvertTo-SecureString $password -AsPlainText -Force
+
+          if (-not (Get-LocalUser -Name "RDP1")) {
+            New-LocalUser -Name "RDP1" -Password $secure -AccountNeverExpires
+          }
+
+          Add-LocalGroupMember -Group "Administrators" -Member "RDP1"
+          echo "PASS=$password" >> $env:GITHUB_ENV
+
+      - name: Install Tailscale
+        run: |
+          $url = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
+          $path = "$env:TEMP\ts.msi"
+          Invoke-WebRequest -Uri $url -OutFile $path
+          Start-Process msiexec.exe -ArgumentList "/i `"$path`" /quiet /norestart" -Wait
+          Remove-Item $path -Force
+
+      - name: Connect to Tailscale
+        run: |
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }}
+
+          $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
+          echo "TSIP=$tsIP" >> $env:GITHUB_ENV
+
+      - name: Keep Alive (Prevent Disconnect)
+        run: |
+          Write-Host "RDP READY"
+          Write-Host "IP: $env:TSIP"
+          Write-Host "USER: RDP1"
+          Write-Host "PASS: $env:PASS"
+          Write-Host "-------------------------------------------"
+          
+          while ($true) {
+            Write-Host "[$(Get-Date)] RDP still active..."
+            qwinsta
+            Start-Sleep -Seconds 60
+          }
